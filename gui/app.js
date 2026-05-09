@@ -208,16 +208,9 @@ function openModal(type) {
 }
 
 async function fetchColumnsAndShowInsert() {
-  const tables = await api(MASTER + `/tables?db=${currentDB}`);
-  const dbs = await api(MASTER + `/databases`);
-  // Get columns from local table data via select
-  const rows = await api(MASTER + `/record/select?db=${currentDB}&table=${currentTable}`);
-  let cols = [];
-  if (rows && rows.length > 0) {
-    cols = Object.keys(rows[0]).filter(c => c !== "id");
-  }
-  // fallback: at least one field
-  if (cols.length === 0) cols = ["value"];
+  // Get columns directly from master endpoint (works even if table is empty)
+  let cols = await api(MASTER + `/columns?db=${currentDB}&table=${currentTable}`);
+  if (!Array.isArray(cols) || cols.length === 0) cols = ["value"];
 
   const overlay = document.getElementById("modal-overlay");
   const content = document.getElementById("modal-content");
