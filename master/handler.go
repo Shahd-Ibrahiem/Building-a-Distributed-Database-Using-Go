@@ -30,6 +30,11 @@ func setupRoutes(mux *http.ServeMux) {
 		}
 	})
 
+	// --- Health check ---
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, 200, map[string]string{"status": "ok", "role": "master"})
+	})
+
 	// --- Register slave ---
 	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
@@ -116,6 +121,20 @@ func setupRoutes(mux *http.ServeMux) {
 		respond(w, 200, map[string]string{"status": "table deleted"})
 	})
 
+
+	// --- Get table columns ---
+	mux.HandleFunc("/columns", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
+		dbName := r.URL.Query().Get("db")
+		tableName := r.URL.Query().Get("table")
+		dbMu.RLock()
+		defer dbMu.RUnlock()
+		db, exists := databases[dbName]
+		if !exists { respondError(w, 404, "database not found"); return }
+		table, exists := db.Tables[tableName]
+		if !exists { respondError(w, 404, "table not found"); return }
+		respond(w, 200, table.Columns)
+	})
 	// --- List tables ---
 	mux.HandleFunc("/tables", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
