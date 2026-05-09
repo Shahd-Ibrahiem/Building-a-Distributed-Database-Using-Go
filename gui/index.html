@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Distributed DB Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="sidebar">
+    <div class="logo">🗄️ DistributedDB</div>
+
+    <div class="section-title">Nodes</div>
+    <div id="nodes-list"></div>
+
+    <div class="section-title">Databases</div>
+    <div id="db-list"></div>
+
+    <div class="sidebar-actions">
+      <button onclick="openModal('create-db')">+ New Database</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span id="current-context">Select a database</span>
+      <div class="topbar-actions">
+        <button class="danger" onclick="openModal('drop-db')" id="btn-drop-db" style="display:none">Drop DB</button>
+        <button onclick="openModal('create-table')" id="btn-create-table" style="display:none">+ New Table</button>
+      </div>
+    </div>
+
+    <div id="tables-bar" class="tables-bar"></div>
+
+    <div class="toolbar" id="toolbar" style="display:none">
+      <button onclick="openModal('insert')">+ Insert</button>
+      <button onclick="openModal('search')">🔍 Search</button>
+      <button onclick="loadRecords()">↻ Refresh</button>
+      <button class="danger" onclick="openModal('delete-table')">Delete Table</button>
+      <span id="special-btn"></span>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <!-- Modals -->
+  <div id="modal-overlay" class="hidden" onclick="closeModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
