@@ -1,0 +1,16 @@
+# Go
+*.exe
+*.test
+*.out
+data_*.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
