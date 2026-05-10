@@ -12,9 +12,11 @@ func main() {
 		port = "8080"
 	}
 
-	// Load any saved databases from disk
-	loadAllDBs()
-	log.Println("[MASTER] Databases loaded from disk")
+	// Connect to MySQL
+	if err := connectMySQL(); err != nil {
+		log.Fatalf("[MASTER] MySQL connection failed: %v", err)
+	}
+	log.Println("[MASTER] Connected to MySQL")
 
 	mux := http.NewServeMux()
 	setupRoutes(mux)
