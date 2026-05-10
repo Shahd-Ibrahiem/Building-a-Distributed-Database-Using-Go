@@ -20,17 +20,7 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 
 func setupRoutes(mux *http.ServeMux) {
 
-	// OPTIONS (CORS preflight)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.WriteHeader(http.StatusOK)
-		}
-	})
-
-	// --- Health check ---
+	// --- Health ---
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]string{"status": "ok", "role": "master"})
 	})
@@ -54,16 +44,14 @@ func setupRoutes(mux *http.ServeMux) {
 		respond(w, 200, slaves)
 	})
 
-	// --- List all databases ---
+	// --- List databases ---
 	mux.HandleFunc("/databases", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
-		dbMu.RLock()
-		defer dbMu.RUnlock()
-		names := []string{}
-		for name := range databases {
-			names = append(names, name)
+		dbs, err := listDBs()
+		if err != nil {
+			respondError(w, 500, err.Error()); return
 		}
-		respond(w, 200, names)
+		respond(w, 200, dbs)
 	})
 
 	// --- Create DB ---
@@ -121,35 +109,27 @@ func setupRoutes(mux *http.ServeMux) {
 		respond(w, 200, map[string]string{"status": "table deleted"})
 	})
 
-
-	// --- Get table columns ---
-	mux.HandleFunc("/columns", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
-		dbName := r.URL.Query().Get("db")
-		tableName := r.URL.Query().Get("table")
-		dbMu.RLock()
-		defer dbMu.RUnlock()
-		db, exists := databases[dbName]
-		if !exists { respondError(w, 404, "database not found"); return }
-		table, exists := db.Tables[tableName]
-		if !exists { respondError(w, 404, "table not found"); return }
-		respond(w, 200, table.Columns)
-	})
 	// --- List tables ---
 	mux.HandleFunc("/tables", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
 		dbName := r.URL.Query().Get("db")
-		dbMu.RLock()
-		defer dbMu.RUnlock()
-		db, exists := databases[dbName]
-		if !exists {
-			respondError(w, 404, "database not found"); return
-		}
-		tables := []string{}
-		for t := range db.Tables {
-			tables = append(tables, t)
+		tables, err := listTables(dbName)
+		if err != nil {
+			respondError(w, 400, err.Error()); return
 		}
 		respond(w, 200, tables)
+	})
+
+	// --- Get columns ---
+	mux.HandleFunc("/columns", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
+		dbName := r.URL.Query().Get("db")
+		tableName := r.URL.Query().Get("table")
+		cols, err := getColumns(dbName, tableName)
+		if err != nil {
+			respondError(w, 400, err.Error()); return
+		}
+		respond(w, 200, cols)
 	})
 
 	// --- Insert ---
@@ -172,9 +152,7 @@ func setupRoutes(mux *http.ServeMux) {
 	// --- Select ---
 	mux.HandleFunc("/record/select", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
-		db := r.URL.Query().Get("db")
-		table := r.URL.Query().Get("table")
-		rows, err := selectRecords(db, table)
+		rows, err := selectRecords(r.URL.Query().Get("db"), r.URL.Query().Get("table"))
 		if err != nil {
 			respondError(w, 400, err.Error()); return
 		}
@@ -184,11 +162,12 @@ func setupRoutes(mux *http.ServeMux) {
 	// --- Search ---
 	mux.HandleFunc("/record/search", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions { respond(w, 200, nil); return }
-		db := r.URL.Query().Get("db")
-		table := r.URL.Query().Get("table")
-		field := r.URL.Query().Get("field")
-		value := r.URL.Query().Get("value")
-		rows, err := searchRecords(db, table, field, value)
+		rows, err := searchRecords(
+			r.URL.Query().Get("db"),
+			r.URL.Query().Get("table"),
+			r.URL.Query().Get("field"),
+			r.URL.Query().Get("value"),
+		)
 		if err != nil {
 			respondError(w, 400, err.Error()); return
 		}
