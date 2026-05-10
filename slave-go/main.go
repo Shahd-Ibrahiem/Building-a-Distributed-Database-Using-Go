@@ -12,8 +12,10 @@ func main() {
 		port = "8081"
 	}
 
-	loadAllDBs()
-	log.Println("[SLAVE-GO] Databases loaded from disk")
+	if err := connectMySQL(); err != nil {
+		log.Fatalf("[SLAVE-GO] MySQL connection failed: %v", err)
+	}
+	log.Println("[SLAVE-GO] Connected to MySQL")
 
 	mux := http.NewServeMux()
 	setupRoutes(mux)
