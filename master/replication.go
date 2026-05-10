@@ -31,26 +31,15 @@ type ReplicationResult struct {
 	Message string
 }
 
-// sendToSlave sends a replication payload to one slave and returns the result via channel
+// sendToSlave sends a replication payload to one slave and returns result via channel
 func sendToSlave(addr string, body []byte, resultCh chan<- ReplicationResult) {
 	resp, err := http.Post("http://"+addr+"/replicate", "application/json", bytes.NewReader(body))
 	if err != nil {
-		// Slave is down — send failure result through channel
-		resultCh <- ReplicationResult{
-			Slave:   addr,
-			Success: false,
-			Message: fmt.Sprintf("unreachable: %v", err),
-		}
+		resultCh <- ReplicationResult{Slave: addr, Success: false, Message: fmt.Sprintf("unreachable: %v", err)}
 		return
 	}
 	defer resp.Body.Close()
-
-	// Slave responded — send success result through channel
-	resultCh <- ReplicationResult{
-		Slave:   addr,
-		Success: true,
-		Message: fmt.Sprintf("status %d", resp.StatusCode),
-	}
+	resultCh <- ReplicationResult{Slave: addr, Success: true, Message: fmt.Sprintf("status %d", resp.StatusCode)}
 }
 
 // broadcast sends the payload to all slaves using goroutines + channels
@@ -85,7 +74,7 @@ func broadcast(payload ReplicationPayload) {
 	}
 }
 
-// syncSlave sends a full snapshot to a newly registered slave
+// syncSlave sends full snapshot to a newly registered slave
 func syncSlave(addr string) error {
 	snapshot := getFullSnapshot()
 	body, _ := json.Marshal(snapshot)
