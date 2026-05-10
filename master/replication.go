@@ -24,26 +24,68 @@ type ReplicationPayload struct {
 	Columns []string    `json:"columns,omitempty"`
 }
 
-// Broadcast to all slaves
-func broadcast(payload ReplicationPayload) {
-	slavesMu.RLock()
-	defer slavesMu.RUnlock()
+// ReplicationResult holds the result of replicating to one slave
+type ReplicationResult struct {
+	Slave   string
+	Success bool
+	Message string
+}
 
-	body, _ := json.Marshal(payload)
-	for _, addr := range slaves {
-		go func(addr string) {
-			resp, err := http.Post("http://"+addr+"/replicate", "application/json", bytes.NewReader(body))
-			if err != nil {
-				log.Printf("[REPLICATION] Slave %s unreachable: %v", addr, err)
-				return
-			}
-			defer resp.Body.Close()
-			log.Printf("[REPLICATION] Slave %s responded: %d", addr, resp.StatusCode)
-		}(addr)
+// sendToSlave sends a replication payload to one slave and returns the result via channel
+func sendToSlave(addr string, body []byte, resultCh chan<- ReplicationResult) {
+	resp, err := http.Post("http://"+addr+"/replicate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		// Slave is down — send failure result through channel
+		resultCh <- ReplicationResult{
+			Slave:   addr,
+			Success: false,
+			Message: fmt.Sprintf("unreachable: %v", err),
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	// Slave responded — send success result through channel
+	resultCh <- ReplicationResult{
+		Slave:   addr,
+		Success: true,
+		Message: fmt.Sprintf("status %d", resp.StatusCode),
 	}
 }
 
-// Send full snapshot to a newly registered slave
+// broadcast sends the payload to all slaves using goroutines + channels
+func broadcast(payload ReplicationPayload) {
+	slavesMu.RLock()
+	slavesCopy := make([]string, len(slaves))
+	copy(slavesCopy, slaves)
+	slavesMu.RUnlock()
+
+	if len(slavesCopy) == 0 {
+		return
+	}
+
+	body, _ := json.Marshal(payload)
+
+	// Channel to collect results from all goroutines
+	resultCh := make(chan ReplicationResult, len(slavesCopy))
+
+	// Launch one goroutine per slave
+	for _, addr := range slavesCopy {
+		go sendToSlave(addr, body, resultCh)
+	}
+
+	// Collect all results from the channel
+	for i := 0; i < len(slavesCopy); i++ {
+		result := <-resultCh
+		if result.Success {
+			log.Printf("[REPLICATION] ✓ Slave %s → %s", result.Slave, result.Message)
+		} else {
+			log.Printf("[REPLICATION] ✗ Slave %s → %s", result.Slave, result.Message)
+		}
+	}
+}
+
+// syncSlave sends a full snapshot to a newly registered slave
 func syncSlave(addr string) error {
 	snapshot := getFullSnapshot()
 	body, _ := json.Marshal(snapshot)
