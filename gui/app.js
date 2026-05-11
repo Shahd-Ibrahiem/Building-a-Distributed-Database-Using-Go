@@ -1,8 +1,8 @@
 // ---- Config ----
-const MASTER = "http://localhost:8080";
-const SLAVE_GO = "http://localhost:8081";
-const SLAVE_PY = "http://localhost:8082";
-const SLAVE_NODE = "http://localhost:8083";
+const MASTER = "http://10.177.240.168:8080";
+const SLAVE_GO = "http://10.177.240.94:8081";
+const SLAVE_PY = "http://10.177.240.190:8082";
+const SLAVE_NODE = "http://10.177.240.90:8083";
 
 const NODES = [
   { name: "Master (Go)",    addr: MASTER,     role: "master" },
@@ -271,15 +271,27 @@ async function createDB() {
 }
 
 async function dropDB() {
+  // Check if we are talking to master or slave
+ // const isMaster = true; // Master is always on port 8080
+const isMaster = window.location.hostname === "10.177.240.168";
+  if (!isMaster) {
+    toast("Only Master can drop a database!", true);
+    closeModal();
+    return;
+  }
+
   await api(MASTER + "/db/drop", "POST", { name: currentDB });
-  currentDB = null; currentTable = null;
+  currentDB = null;
+  currentTable = null;
   document.getElementById("current-context").textContent = "Select a database";
   document.getElementById("btn-drop-db").style.display = "none";
   document.getElementById("btn-create-table").style.display = "none";
   document.getElementById("tables-bar").innerHTML = "";
   document.getElementById("toolbar").style.display = "none";
   document.getElementById("results").innerHTML = "";
-  closeModal(); toast("Database dropped!"); await refreshDBs();
+  closeModal();
+  toast("Database dropped!");
+  await refreshDBs();
 }
 
 async function createTable() {

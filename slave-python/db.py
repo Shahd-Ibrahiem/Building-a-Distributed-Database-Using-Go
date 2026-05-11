@@ -110,7 +110,45 @@ def get_columns(db_name, table_name):
     except Exception as e:
         return None, str(e)
 
-# Special feature: table stats
+# ---------- Direct Write Operations ----------
+
+def insert_record(db_name, table_name, record):
+    try:
+        cols = ", ".join(f"`{k}`" for k in record)
+        placeholders = ", ".join(["%s"] * len(record))
+        vals = list(record.values())
+        last_id = execute(
+            f"INSERT INTO `{db_name}`.`{table_name}` ({cols}) VALUES ({placeholders})", vals
+        )
+        return str(last_id), None
+    except Exception as e:
+        return None, str(e)
+
+def update_record(db_name, table_name, record_id, updates):
+    try:
+        sets = ", ".join(f"`{k}` = %s" for k in updates)
+        vals = list(updates.values()) + [record_id]
+        execute(f"UPDATE `{db_name}`.`{table_name}` SET {sets} WHERE id = %s", vals)
+        return None
+    except Exception as e:
+        return str(e)
+
+def delete_record(db_name, table_name, record_id):
+    try:
+        execute(f"DELETE FROM `{db_name}`.`{table_name}` WHERE id = %s", [record_id])
+        return None
+    except Exception as e:
+        return str(e)
+
+def delete_table(db_name, table_name):
+    try:
+        execute(f"DROP TABLE IF EXISTS `{db_name}`.`{table_name}`")
+        return None
+    except Exception as e:
+        return str(e)
+
+# ---------- Special Feature: Table Stats ----------
+
 def get_table_stats(db_name, table_name):
     try:
         cols, _ = get_columns(db_name, table_name)

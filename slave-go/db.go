@@ -12,8 +12,9 @@ import (
 type Record map[string]string
 
 var (
-	db   *sql.DB
-	dbMu sync.RWMutex
+	db         *sql.DB
+	dbMu       sync.RWMutex
+	sessionDBs = map[string]bool{}
 )
 
 func connectMySQL() error {
@@ -31,10 +32,12 @@ func connectMySQL() error {
 // ---------- Apply Replication Actions ----------
 
 func applyCreateDB(name string) {
+	sessionDBs[name] = true
 	db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name))
 }
 
 func applyDropDB(name string) {
+	delete(sessionDBs, name)
 	db.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
 }
 
@@ -104,22 +107,18 @@ func searchRecords(dbName, tableName, field, value string) ([]map[string]string,
 }
 
 func listDBs() ([]string, error) {
-	rows, err := db.Query("SHOW DATABASES")
-	if err != nil { return nil, err }
-	defer rows.Close()
-	system := map[string]bool{"information_schema": true, "mysql": true, "performance_schema": true, "sys": true}
 	var dbs []string
-	for rows.Next() {
-		var name string
-		rows.Scan(&name)
-		if !system[name] { dbs = append(dbs, name) }
+	for name := range sessionDBs {
+		dbs = append(dbs, name)
 	}
 	return dbs, nil
 }
 
 func listTables(dbName string) ([]string, error) {
 	rows, err := db.Query(fmt.Sprintf("SHOW TABLES IN `%s`", dbName))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var tables []string
 	for rows.Next() {
@@ -132,38 +131,51 @@ func listTables(dbName string) ([]string, error) {
 
 func getColumns(dbName, tableName string) ([]string, error) {
 	rows, err := db.Query(fmt.Sprintf("SHOW COLUMNS FROM `%s`.`%s`", dbName, tableName))
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var cols []string
 	for rows.Next() {
 		var field, typ, null, key, def, extra sql.NullString
 		rows.Scan(&field, &typ, &null, &key, &def, &extra)
-		if field.String != "id" { cols = append(cols, field.String) }
+		if field.String != "id" {
+			cols = append(cols, field.String)
+		}
 	}
 	return cols, nil
 }
 
-// applyFullSync recreates all databases and tables from master snapshot
 func applyFullSync(snapshot map[string]interface{}) {
 	for dbName, dbData := range snapshot {
 		applyCreateDB(dbName)
 		tables, ok := dbData.(map[string]interface{})
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		for tableName, tableData := range tables {
 			td, ok := tableData.(map[string]interface{})
-			if !ok { continue }
+			if !ok {
+				continue
+			}
 			colsRaw, _ := td["columns"].([]interface{})
 			cols := []string{}
-			for _, c := range colsRaw { cols = append(cols, fmt.Sprintf("%v", c)) }
+			for _, c := range colsRaw {
+				cols = append(cols, fmt.Sprintf("%v", c))
+			}
 			applyCreateTable(dbName, tableName, cols)
 			rowsRaw, _ := td["rows"].([]interface{})
 			for _, rowRaw := range rowsRaw {
 				row, ok := rowRaw.(map[string]interface{})
-				if !ok { continue }
+				if !ok {
+					continue
+				}
 				id := fmt.Sprintf("%v", row["id"])
 				record := Record{}
 				for k, v := range row {
-					if k != "id" { record[k] = fmt.Sprintf("%v", v) }
+					if k != "id" {
+						record[k] = fmt.Sprintf("%v", v)
+					}
 				}
 				applyInsert(dbName, tableName, id, record)
 			}
@@ -173,20 +185,86 @@ func applyFullSync(snapshot map[string]interface{}) {
 
 func queryRows(query string, args ...interface{}) ([]map[string]string, error) {
 	rows, err := db.Query(query, args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	cols, _ := rows.Columns()
 	var results []map[string]string
 	for rows.Next() {
 		vals := make([]interface{}, len(cols))
 		ptrs := make([]interface{}, len(cols))
-		for i := range vals { ptrs[i] = &vals[i] }
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
 		rows.Scan(ptrs...)
 		row := map[string]string{}
 		for i, col := range cols {
-			if vals[i] != nil { row[col] = fmt.Sprintf("%s", vals[i]) } else { row[col] = "" }
+			if vals[i] != nil {
+				row[col] = fmt.Sprintf("%s", vals[i])
+			} else {
+				row[col] = ""
+			}
 		}
 		results = append(results, row)
 	}
 	return results, nil
+}
+
+// ---------- Direct Write Operations ----------
+
+func insertRecord(dbName, tableName string, record Record) (string, error) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	cols := []string{}
+	vals := []interface{}{}
+	placeholders := []string{}
+	for k, v := range record {
+		cols = append(cols, fmt.Sprintf("`%s`", k))
+		vals = append(vals, v)
+		placeholders = append(placeholders, "?")
+	}
+	query := fmt.Sprintf(
+		"INSERT INTO `%s`.`%s` (%s) VALUES (%s)",
+		dbName, tableName,
+		strings.Join(cols, ", "),
+		strings.Join(placeholders, ", "),
+	)
+	result, err := db.Exec(query, vals...)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert: %v", err)
+	}
+	id, _ := result.LastInsertId()
+	return fmt.Sprintf("%d", id), nil
+}
+
+func updateRecord(dbName, tableName, id string, updates Record) error {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	sets := []string{}
+	vals := []interface{}{}
+	for k, v := range updates {
+		sets = append(sets, fmt.Sprintf("`%s` = ?", k))
+		vals = append(vals, v)
+	}
+	vals = append(vals, id)
+	_, err := db.Exec(
+		fmt.Sprintf("UPDATE `%s`.`%s` SET %s WHERE id = ?", dbName, tableName, strings.Join(sets, ", ")),
+		vals...,
+	)
+	return err
+}
+
+func deleteRecord(dbName, tableName, id string) error {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	_, err := db.Exec(fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE id = ?", dbName, tableName), id)
+	return err
+}
+
+func deleteTable(dbName, tableName string) error {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	_, err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s`", dbName, tableName))
+	return err
 }

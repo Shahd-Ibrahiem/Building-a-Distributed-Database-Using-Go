@@ -1,6 +1,7 @@
 const mysql = require("mysql2/promise");
 
 let pool;
+const sessionDBs = new Set();
 
 async function connect() {
   pool = mysql.createPool({
@@ -10,18 +11,18 @@ async function connect() {
     waitForConnections: true,
     connectionLimit: 10,
   });
-  await pool.query("SELECT 1"); // test connection
+  await pool.query("SELECT 1");
 }
-
-const SYSTEM_DBS = new Set(["information_schema", "mysql", "performance_schema", "sys"]);
 
 // ---------- Apply Replication ----------
 
 async function applyCreateDB(name) {
+  sessionDBs.add(name);
   await pool.query(`CREATE DATABASE IF NOT EXISTS \`${name}\``);
 }
 
 async function applyDropDB(name) {
+  sessionDBs.delete(name);
   await pool.query(`DROP DATABASE IF EXISTS \`${name}\``);
 }
 
@@ -84,8 +85,7 @@ async function searchRecords(dbName, tableName, field, value) {
 }
 
 async function listDBs() {
-  const [rows] = await pool.query("SHOW DATABASES");
-  return rows.map(r => Object.values(r)[0]).filter(n => !SYSTEM_DBS.has(n));
+  return [...sessionDBs];
 }
 
 async function listTables(dbName) {
@@ -107,8 +107,35 @@ async function exportCSV(dbName, tableName) {
   return [header, ...lines].join("\n");
 }
 
+// ---------- Direct Write Operations ----------
+
+async function insertRecord(dbName, tableName, record) {
+  const cols = Object.keys(record).map(k => `\`${k}\``).join(", ");
+  const placeholders = Object.keys(record).map(() => "?").join(", ");
+  const vals = Object.values(record);
+  const [result] = await pool.query(
+    `INSERT INTO \`${dbName}\`.\`${tableName}\` (${cols}) VALUES (${placeholders})`, vals
+  );
+  return String(result.insertId);
+}
+
+async function updateRecord(dbName, tableName, id, updates) {
+  const sets = Object.keys(updates).map(k => `\`${k}\` = ?`).join(", ");
+  const vals = [...Object.values(updates), id];
+  await pool.query(`UPDATE \`${dbName}\`.\`${tableName}\` SET ${sets} WHERE id = ?`, vals);
+}
+
+async function deleteRecord(dbName, tableName, id) {
+  await pool.query(`DELETE FROM \`${dbName}\`.\`${tableName}\` WHERE id = ?`, [id]);
+}
+
+async function deleteTable(dbName, tableName) {
+  await pool.query(`DROP TABLE IF EXISTS \`${dbName}\`.\`${tableName}\``);
+}
+
 module.exports = {
   connect, applyCreateDB, applyDropDB, applyCreateTable, applyDeleteTable,
   applyInsert, applyUpdate, applyDelete, applyFullSync,
-  selectRecords, searchRecords, listDBs, listTables, getColumns, exportCSV
+  selectRecords, searchRecords, listDBs, listTables, getColumns, exportCSV,
+  insertRecord, updateRecord, deleteRecord, deleteTable
 };

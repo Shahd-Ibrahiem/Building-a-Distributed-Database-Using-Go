@@ -3,7 +3,8 @@ import os
 from db import (
     apply_create_db, apply_drop_db, apply_create_table, apply_delete_table,
     apply_insert, apply_update, apply_delete, apply_full_sync,
-    select_records, search_records, list_dbs, list_tables, get_columns, get_table_stats
+    select_records, search_records, list_dbs, list_tables, get_columns,
+    get_table_stats, insert_record, update_record, delete_record, delete_table
 )
 
 app = Flask(__name__)
@@ -31,13 +32,13 @@ def replicate():
     if request.method == "OPTIONS": return jsonify({}), 200
     p = request.get_json()
     action = p.get("action")
-    if action == "create_db":    apply_create_db(p["db"])
-    elif action == "drop_db":    apply_drop_db(p["db"])
+    if action == "create_db":      apply_create_db(p["db"])
+    elif action == "drop_db":      apply_drop_db(p["db"])
     elif action == "create_table": apply_create_table(p["db"], p["table"], p.get("columns", []))
     elif action == "delete_table": apply_delete_table(p["db"], p["table"])
-    elif action == "insert":     apply_insert(p["db"], p["table"], p["id"], p.get("data", {}))
-    elif action == "update":     apply_update(p["db"], p["table"], p["id"], p.get("data", {}))
-    elif action == "delete":     apply_delete(p["db"], p["table"], p["id"])
+    elif action == "insert":       apply_insert(p["db"], p["table"], p["id"], p.get("data", {}))
+    elif action == "update":       apply_update(p["db"], p["table"], p["id"], p.get("data", {}))
+    elif action == "delete":       apply_delete(p["db"], p["table"], p["id"])
     return jsonify({"status": "applied"})
 
 @app.route("/record/select")
@@ -51,6 +52,38 @@ def search():
     rows, err = search_records(request.args.get("db"), request.args.get("table"), request.args.get("field"), request.args.get("value"))
     if err: return jsonify({"error": err}), 400
     return jsonify(rows)
+
+@app.route("/record/insert", methods=["POST", "OPTIONS"])
+def insert():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    p = request.get_json()
+    id_, err = insert_record(p["db"], p["table"], p["record"])
+    if err: return jsonify({"error": err}), 400
+    return jsonify({"status": "inserted", "id": id_})
+
+@app.route("/record/update", methods=["POST", "OPTIONS"])
+def update():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    p = request.get_json()
+    err = update_record(p["db"], p["table"], p["id"], p["updates"])
+    if err: return jsonify({"error": err}), 400
+    return jsonify({"status": "updated"})
+
+@app.route("/record/delete", methods=["POST", "OPTIONS"])
+def delete_rec():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    p = request.get_json()
+    err = delete_record(p["db"], p["table"], p["id"])
+    if err: return jsonify({"error": err}), 400
+    return jsonify({"status": "deleted"})
+
+@app.route("/table/delete", methods=["POST", "OPTIONS"])
+def del_table():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    p = request.get_json()
+    err = delete_table(p["db"], p["table"])
+    if err: return jsonify({"error": err}), 400
+    return jsonify({"status": "table deleted"})
 
 @app.route("/databases")
 def databases():

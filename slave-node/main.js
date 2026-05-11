@@ -2,7 +2,8 @@ const express = require("express");
 const {
   connect, applyCreateDB, applyDropDB, applyCreateTable, applyDeleteTable,
   applyInsert, applyUpdate, applyDelete, applyFullSync,
-  selectRecords, searchRecords, listDBs, listTables, getColumns, exportCSV
+  selectRecords, searchRecords, listDBs, listTables, getColumns, exportCSV,
+  insertRecord, updateRecord, deleteRecord, deleteTable
 } = require("./db");
 
 const app = express();
@@ -24,6 +25,7 @@ app.post("/sync", async (req, res) => {
   res.json({ status: "synced" });
 });
 
+// Replication from master only
 app.post("/replicate", async (req, res) => {
   const { action, db, table, id, data, columns } = req.body;
   try {
@@ -43,22 +45,44 @@ app.post("/replicate", async (req, res) => {
 });
 
 app.get("/record/select", async (req, res) => {
-  try {
-    const rows = await selectRecords(req.query.db, req.query.table);
-    res.json(rows);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await selectRecords(req.query.db, req.query.table)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.get("/record/search", async (req, res) => {
+  try { res.json(await searchRecords(req.query.db, req.query.table, req.query.field, req.query.value)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post("/record/insert", async (req, res) => {
   try {
-    const rows = await searchRecords(req.query.db, req.query.table, req.query.field, req.query.value);
-    res.json(rows);
+    const id = await insertRecord(req.body.db, req.body.table, req.body.record);
+    res.json({ status: "inserted", id });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get("/databases", async (req, res) => {
-  res.json(await listDBs());
+app.post("/record/update", async (req, res) => {
+  try {
+    await updateRecord(req.body.db, req.body.table, req.body.id, req.body.updates);
+    res.json({ status: "updated" });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+app.post("/record/delete", async (req, res) => {
+  try {
+    await deleteRecord(req.body.db, req.body.table, req.body.id);
+    res.json({ status: "deleted" });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post("/table/delete", async (req, res) => {
+  try {
+    await deleteTable(req.body.db, req.body.table);
+    res.json({ status: "table deleted" });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get("/databases", async (req, res) => res.json(await listDBs()));
 
 app.get("/tables", async (req, res) => {
   try { res.json(await listTables(req.query.db)); }
@@ -70,7 +94,6 @@ app.get("/columns", async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Special Feature: CSV Export
 app.get("/export/csv", async (req, res) => {
   try {
     const csv = await exportCSV(req.query.db, req.query.table);
@@ -79,7 +102,6 @@ app.get("/export/csv", async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Start server after connecting to MySQL
 connect()
   .then(() => {
     console.log("[SLAVE-NODE] Connected to MySQL");
